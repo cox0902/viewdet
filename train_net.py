@@ -98,7 +98,7 @@ class ImageCodeDataset(Dataset):
 class DatasetMapper:
 
     def __init__(self, cfg, is_train):
-        self.augmentations = utils.build_augmentation(cfg, is_train)
+        self.augmentations = T.AugmentationList(utils.build_augmentation(cfg, is_train))
 
     def _transform_annotations(self, dataset_dict, transforms, image_shape):
         # USER: Implement additional transformations if you have other types of data
