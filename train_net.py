@@ -56,7 +56,8 @@ class ImageCodeDataset(Dataset):
     
     def __getitem__(self, index: int) -> Dict:
         img_idx = self.__idx(index)
-        image = torch.from_numpy(self.images[img_idx])
+        # image = torch.from_numpy(self.images[img_idx])
+        image = self.images[img_idx]
         # if self.transform is not None:
         #     image = self.transform(image)
 
