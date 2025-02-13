@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
-from detectron2.data import build_detection_train_loader
+from detectron2.data import transforms as T, build_detection_train_loader, detection_utils as utils
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
 
 
@@ -94,6 +94,48 @@ class ImageCodeDataset(Dataset):
         }
 
 
+class DatasetMapper:
+
+    def __init__(self, cfg, is_train):
+        self.augmentations = utils.build_augmentation(cfg, is_train)
+
+    def _transform_annotations(self, dataset_dict, transforms, image_shape):
+        # USER: Implement additional transformations if you have other types of data
+        annos = [
+            utils.transform_instance_annotations(
+                obj, transforms, image_shape
+            )
+            for obj in dataset_dict.pop("annotations")
+            if obj.get("iscrowd", 0) == 0
+        ]
+        instances = utils.annotations_to_instances(
+            annos, image_shape
+        )
+
+        dataset_dict["instances"] = utils.filter_empty_instances(instances)
+
+    def __call__(self, dataset_dict):
+        """
+        Args:
+            dataset_dict (dict): Metadata of one image, in Detectron2 Dataset format.
+
+        Returns:
+            dict: a format that builtin models in detectron2 accept
+        """
+        # dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
+
+        aug_input = T.AugInput(dataset_dict["image"])
+        transforms = self.augmentations(aug_input)
+        image = aug_input.image
+
+        image_shape = image.shape[:2]  # h, w
+
+        if "annotations" in dataset_dict:
+            self._transform_annotations(dataset_dict, transforms, image_shape)
+
+        return dataset_dict
+
+
 class Trainer(DefaultTrainer):
     """
     We use the "DefaultTrainer" which contains a number pre-defined logic for
@@ -109,7 +151,8 @@ class Trainer(DefaultTrainer):
                                    cfg.DATASETS.CODE_PATH,
                                    split,
                                    label_trans_path=cfg.DATASETS.LABEL_TRANS_PATH)
-        return build_detection_train_loader(cfg, dataset=dataset)
+        dataset_mapper = DatasetMapper(cfg, is_train=True)
+        return build_detection_train_loader(cfg, dataset=dataset, mapper=dataset_mapper)
 
     # @classmethod
     # def build_lr_scheduler(cls, cfg, optimizer):
