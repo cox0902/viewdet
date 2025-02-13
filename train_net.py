@@ -87,7 +87,7 @@ class ImageCodeDataset(Dataset):
             })
 
         return {
-            "image": image,
+            "image": np.transpose(image, (1, 2, 0)),
             "height": 256,
             "width": 256,
             "image_id": img_idx,
@@ -130,6 +130,8 @@ class DatasetMapper:
         image = aug_input.image
 
         image_shape = image.shape[:2]  # h, w
+
+        dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
 
         if "annotations" in dataset_dict:
             self._transform_annotations(dataset_dict, transforms, image_shape)
