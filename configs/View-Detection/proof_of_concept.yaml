@@ -1,0 +1,10 @@
+_BASE_: "./faster_rcnn_R_50_FPN_3x.yaml"
+MODEL:
+  DEVICE: cpu
+DATASETS:
+  IMAGE_PATH: /Volumes/Home/codehub/r1/kaggle/rico240516/images.hdf5
+  CODE_PATH: /Volumes/Home/codehub/r1/kaggle/end-pix2code-full/codes_full.hdf5 
+  SPLIT_PATH: /Volumes/Home/codehub/r1/kaggle/end-pix2code-full/split_fold_0.npz 
+  LABEL_TRANS_PATH: /Volumes/Home/codehub/pytorch_pix2code/unit_test/vocabs_trans.json
+DATALOADER:
+  NUM_WORKERS: 0
