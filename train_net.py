@@ -12,6 +12,56 @@ from detectron2.data import transforms as T, build_detection_train_loader, detec
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
 
 
+class ImageDataset(Dataset):
+
+    def __init__(self,
+                 image_path: str,
+                 split,
+                 ):
+        super().__init__()
+        self.hi = h5py.File(image_path, "r")
+        self.images = self.hi["images"]
+        self.labels = self.hi["labels"]   
+        self.rects = self.hi["rects"]
+
+        self.split = np.unique(self.labels[split, 0])
+
+    def __len__(self):
+        if self.split is not None:
+            return len(self.split)
+        return len(self.images)
+
+    def __getitem__(self, index):
+        img_idx = self.__idx(index)
+        # image = torch.from_numpy(self.images[img_idx])
+        image = self.images[img_idx]
+        # if self.transform is not None:
+        #     image = self.transform(image)
+
+        annotations = []
+
+        indices = np.where((self.labels[:, 0] == img_idx) & (self.labels[:, 2] == 1) & (self.labels[:, 4] == 1))[0]
+        for i in indices:
+            rect = self.rects[i]
+            annotations.append({
+                "bbox": rect,
+                "bbox_mode": 0,  # BoxMode.XYXY_ABS
+                "category_id": 0,
+            })
+
+        return {
+            "image": np.transpose(image, (1, 2, 0)),
+            "height": 256,
+            "width": 256,
+            "image_id": img_idx,
+            "annotations": annotations
+        }
+
+    def __idx(self, idx):
+        return self.split[idx] if self.split is not None else idx
+
+
+
 class ImageCodeDataset(Dataset):
 
     def __init__(self,
@@ -27,8 +77,11 @@ class ImageCodeDataset(Dataset):
         #     T.Normalize(mean=mean, std=std),
         #     T.ToPureTensor()
         # ])
-        with open(label_trans_path, "r") as input:
-            self.label_trans = json.load(input)
+        if label_trans_path is not None:
+            with open(label_trans_path, "r") as input:
+                self.label_trans = json.load(input)
+        else:
+            self.label_trans = None
 
         self.hi = h5py.File(image_path, "r")
         self.images = self.hi["images"]
@@ -44,6 +97,11 @@ class ImageCodeDataset(Dataset):
         # print(self.split)
         assert len(self.split) < len(self.images), (len(self.split), len(self.images))
 
+    def get_num_classes(self):
+        if self.label_trans is None:
+            return 90 - 8
+        return 2
+    
     def __len__(self) -> int:
         if self.split is not None:
             return len(self.split)
@@ -63,7 +121,8 @@ class ImageCodeDataset(Dataset):
 
         annotations = []
 
-        indices = np.where(self.idx == img_idx)[0]
+        indices = np.where(self.idx[:] == img_idx)[0]
+        # print(indices)
         for i in indices:
             pid = self.pid[i]
             piv = self.piv[i]
@@ -77,13 +136,17 @@ class ImageCodeDataset(Dataset):
             else:
                 rect = (0, 0, image.size(1) - 1, image.size(2) - 1)
 
-            category_id = self.label_trans[piv][-1]
-            assert category_id in [8, 40]
+            if self.label_trans is not None:
+                category_id = self.label_trans[piv][-1]
+                assert category_id in [8, 40]
+                category_id = 0 if category_id == 8 else 1
+            else:
+                category_id = piv - 8
 
             annotations.append({
                 "bbox": rect,
                 "bbox_mode": 0,  # BoxMode.XYXY_ABS
-                "category_id": 0 if category_id == 8 else 1,
+                "category_id": category_id,
             })
 
         return {
@@ -150,11 +213,15 @@ class Trainer(DefaultTrainer):
     @classmethod
     def build_train_loader(cls, cfg):
         split = np.load(cfg.DATASETS.SPLIT_PATH)["train"]
-        dataset = ImageCodeDataset(cfg.DATASETS.IMAGE_PATH,
-                                   cfg.DATASETS.CODE_PATH,
-                                   split,
-                                   label_trans_path=cfg.DATASETS.LABEL_TRANS_PATH)
+        if cfg.DATASETS.CODE_PATH in [None, ""]:
+            dataset = ImageDataset(cfg.DATASETS.IMAGE_PATH, split)
+        else:
+            dataset = ImageCodeDataset(cfg.DATASETS.IMAGE_PATH,
+                                       cfg.DATASETS.CODE_PATH,
+                                       split,
+                                       label_trans_path=cfg.DATASETS.LABEL_TRANS_PATH)
         dataset_mapper = DatasetMapper(cfg, is_train=True)
+        assert cfg.MODEL.ROI_HEADS.NUM_CLASSES == dataset.get_num_classes()
         return build_detection_train_loader(cfg, dataset=dataset, mapper=dataset_mapper)
 
     # @classmethod
