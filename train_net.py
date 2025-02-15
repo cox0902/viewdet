@@ -240,10 +240,10 @@ def setup(args):
     cfg = get_cfg()
     
     #
-    cfg.DATASETS.IMAGE_PATH = ""
-    cfg.DATASETS.CODE_PATH = ""
-    cfg.DATASETS.SPLIT_PATH = ""
-    cfg.DATASETS.LABEL_TRANS_PATH = ""
+    cfg.DATASETS.IMAGE_PATH = None
+    cfg.DATASETS.CODE_PATH = None
+    cfg.DATASETS.SPLIT_PATH = None
+    cfg.DATASETS.LABEL_TRANS_PATH = None
 
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
