@@ -59,6 +59,9 @@ class ImageDataset(Dataset):
 
     def __idx(self, idx):
         return self.split[idx] if self.split is not None else idx
+    
+    def get_num_classes(self):
+        return 1
 
 
 
