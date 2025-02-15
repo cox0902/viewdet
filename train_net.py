@@ -77,11 +77,11 @@ class ImageCodeDataset(Dataset):
         #     T.Normalize(mean=mean, std=std),
         #     T.ToPureTensor()
         # ])
-        if label_trans_path is not None:
+        if label_trans_path in [None, ""]:
+            self.label_trans = None
+        else:
             with open(label_trans_path, "r") as input:
                 self.label_trans = json.load(input)
-        else:
-            self.label_trans = None
 
         self.hi = h5py.File(image_path, "r")
         self.images = self.hi["images"]
