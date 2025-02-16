@@ -12,67 +12,15 @@ from detectron2.data import transforms as T, build_detection_train_loader, detec
 from detectron2.engine import DefaultTrainer, default_argument_parser, default_setup, launch
 
 
-class ImageDataset(Dataset):
-
-    def __init__(self,
-                 image_path: str,
-                 split,
-                 ):
-        super().__init__()
-        self.hi = h5py.File(image_path, "r")
-        self.images = self.hi["images"]
-        self.labels = self.hi["labels"]   
-        self.rects = self.hi["rects"]
-
-        self.split = np.unique(self.labels[split, 0])
-
-    def __len__(self):
-        if self.split is not None:
-            return len(self.split)
-        return len(self.images)
-
-    def __getitem__(self, index):
-        img_idx = self.__idx(index)
-        # image = torch.from_numpy(self.images[img_idx])
-        image = self.images[img_idx]
-        # if self.transform is not None:
-        #     image = self.transform(image)
-
-        annotations = []
-
-        indices = np.where((self.labels[:, 0] == img_idx) & (self.labels[:, 2] == 1) & (self.labels[:, 4] == 1))[0]
-        for i in indices:
-            rect = self.rects[i]
-            annotations.append({
-                "bbox": rect,
-                "bbox_mode": 0,  # BoxMode.XYXY_ABS
-                "category_id": 0,
-            })
-
-        return {
-            "image": np.transpose(image, (1, 2, 0)),
-            "height": 256,
-            "width": 256,
-            "image_id": img_idx,
-            "annotations": annotations
-        }
-
-    def __idx(self, idx):
-        return self.split[idx] if self.split is not None else idx
-    
-    def get_num_classes(self):
-        return 1
-
-
-
 class ImageCodeDataset(Dataset):
 
     def __init__(self,
+                 num_classes,
                  image_path: str,
                  code_path: str,
                  split,
                  *,
-                #  transform = None,
+                 #  transform = None,
                  label_trans_path = None):
         super().__init__()
         # self.transform = T.Compose([
@@ -80,6 +28,11 @@ class ImageCodeDataset(Dataset):
         #     T.Normalize(mean=mean, std=std),
         #     T.ToPureTensor()
         # ])
+        self.debug = []
+
+        self.num_classes = num_classes
+        assert self.num_classes in [1, 2, 33, 82]
+
         if label_trans_path in [None, ""]:
             self.label_trans = None
         else:
@@ -96,14 +49,12 @@ class ImageCodeDataset(Dataset):
         self.pid = self.hc["pid"]
         self.piv = self.hc["piv"]
 
-        self.split = np.unique(self.idx[split])
-        # print(self.split)
-        assert len(self.split) < len(self.images), (len(self.split), len(self.images))
-
-    def get_num_classes(self):
-        if self.label_trans is None:
-            return 90 - 8
-        return 2
+        if split is not None:
+            self.split = np.unique(self.idx[split])
+            # print(self.split)
+        else:
+            self.split = np.unique(self.idx[:])
+        assert len(self.split) <= len(self.images), (len(self.split), len(self.images))
     
     def __len__(self) -> int:
         if self.split is not None:
@@ -129,21 +80,42 @@ class ImageCodeDataset(Dataset):
         for i in indices:
             pid = self.pid[i]
             piv = self.piv[i]
-            if pid != -1:
-                loc = np.where(np.logical_and(
-                    self.labels[:, 0] == img_idx,
-                    self.labels[:, 1] == pid
-                ))
-                assert len(loc[0]) == 1
-                rect = self.rects[loc[0]][0]
-            else:
-                rect = (0, 0, image.size(1) - 1, image.size(2) - 1)
+            assert pid != -1
 
-            if self.label_trans is not None:
+            logical = ((self.labels[:, 0] == img_idx) & (self.labels[:, 1] == pid))
+            if self.num_classes in [1, 33]:
+                logical = (logical & (self.labels[:, 4] == 1))
+
+            loc = np.where(logical)
+            if len(loc[0]) == 0:
+                continue
+
+            assert len(loc[0]) == 1
+            rect = self.rects[loc[0]][0]
+
+            if self.num_classes == 1:
+                if piv not in self.label_trans:
+                    if piv not in self.debug:
+                        self.debug.append(piv)
+                    # category_id = self.label_trans.index(40)
+                    continue
+                else:
+                    # assert piv in self.label_trans, piv
+                    category_id = 1
+            elif self.num_classes == 2:
                 category_id = self.label_trans[piv][-1]
                 assert category_id in [8, 40]
                 category_id = 0 if category_id == 8 else 1
-            else:
+            elif self.num_classes == 33:
+                if piv not in self.label_trans:
+                    if piv not in self.debug:
+                        self.debug.append(piv)
+                    # category_id = self.label_trans.index(40)
+                    continue
+                else:
+                    # assert piv in self.label_trans, piv
+                    category_id = self.label_trans.index(piv)
+            elif self.num_classes == 82:
                 category_id = piv - 8
 
             annotations.append({
@@ -164,19 +136,23 @@ class ImageCodeDataset(Dataset):
 class DatasetMapper:
 
     def __init__(self, cfg, is_train):
-        self.augmentations = T.AugmentationList(utils.build_augmentation(cfg, is_train))
+        # self.augmentations = T.AugmentationList(utils.build_augmentation(cfg, is_train))
+        pass
 
     def _transform_annotations(self, dataset_dict, transforms, image_shape):
         # USER: Implement additional transformations if you have other types of data
-        annos = [
-            utils.transform_instance_annotations(
-                obj, transforms, image_shape
-            )
-            for obj in dataset_dict.pop("annotations")
-            if obj.get("iscrowd", 0) == 0
-        ]
+        # annos = [
+        #     utils.transform_instance_annotations(
+        #         obj, transforms, image_shape
+        #     )
+        #     for obj in dataset_dict.pop("annotations")
+        #     if obj.get("iscrowd", 0) == 0
+        # ]
+        # instances = utils.annotations_to_instances(
+        #     annos, image_shape
+        # )
         instances = utils.annotations_to_instances(
-            annos, image_shape
+            dataset_dict["annotations"], image_shape
         )
 
         dataset_dict["instances"] = utils.filter_empty_instances(instances)
@@ -191,16 +167,17 @@ class DatasetMapper:
         """
         # dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
 
-        aug_input = T.AugInput(dataset_dict["image"])
-        transforms = self.augmentations(aug_input)
-        image = aug_input.image
+        # aug_input = T.AugInput(dataset_dict["image"])
+        # transforms = self.augmentations(aug_input)
+        # image = aug_input.image
+        image = dataset_dict["image"]
 
         image_shape = image.shape[:2]  # h, w
 
         dataset_dict["image"] = torch.as_tensor(np.ascontiguousarray(image.transpose(2, 0, 1)))
 
         if "annotations" in dataset_dict:
-            self._transform_annotations(dataset_dict, transforms, image_shape)
+            self._transform_annotations(dataset_dict, None, image_shape)
 
         return dataset_dict
 
@@ -216,15 +193,13 @@ class Trainer(DefaultTrainer):
     @classmethod
     def build_train_loader(cls, cfg):
         split = np.load(cfg.DATASETS.SPLIT_PATH)["train"]
-        if cfg.DATASETS.CODE_PATH in [None, ""]:
-            dataset = ImageDataset(cfg.DATASETS.IMAGE_PATH, split)
-        else:
-            dataset = ImageCodeDataset(cfg.DATASETS.IMAGE_PATH,
-                                       cfg.DATASETS.CODE_PATH,
-                                       split,
-                                       label_trans_path=cfg.DATASETS.LABEL_TRANS_PATH)
+        dataset = ImageCodeDataset(
+            cfg.MODEL.ROI_HEADS.NUM_CLASSES,
+            cfg.DATASETS.IMAGE_PATH,
+            cfg.DATASETS.CODE_PATH,
+            split,
+            label_trans_path=cfg.DATASETS.LABEL_TRANS_PATH)
         dataset_mapper = DatasetMapper(cfg, is_train=True)
-        assert cfg.MODEL.ROI_HEADS.NUM_CLASSES == dataset.get_num_classes()
         return build_detection_train_loader(cfg, dataset=dataset, mapper=dataset_mapper)
 
     # @classmethod
